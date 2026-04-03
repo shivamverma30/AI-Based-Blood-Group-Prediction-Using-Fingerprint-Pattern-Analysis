@@ -121,7 +121,7 @@ AI-Based-Blood-Group-Prediction-Using-Fingerprint-Pattern-Analysis/
 ## 10. Running the Project Locally
 ### Step 1: Clone the repository
 ```bash
-git clone https://github.com/<your-username>/AI-Based-Blood-Group-Prediction-Using-Fingerprint-Pattern-Analysis.git
+git clone https://github.com/<shivamverma30>/AI-Based-Blood-Group-Prediction-Using-Fingerprint-Pattern-Analysis.git
 cd AI-Based-Blood-Group-Prediction-Using-Fingerprint-Pattern-Analysis
 ```
 
