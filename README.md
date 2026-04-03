@@ -1,5 +1,7 @@
 # AI-Based Blood Group Prediction Using Fingerprint Pattern Analysis
 
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Open%20App-ff4b4b?style=for-the-badge&logo=streamlit&logoColor=white)](https://hemoscan.streamlit.app/) ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white) ![Streamlit App](https://img.shields.io/badge/Streamlit-App-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white) ![Deep Learning](https://img.shields.io/badge/Deep%20Learning-Enabled-0A66C2?style=for-the-badge&logo=tensorflow&logoColor=white) ![PyTorch](https://img.shields.io/badge/PyTorch-Framework-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white) ![Project Status](https://img.shields.io/badge/Status-Active-2ea44f?style=for-the-badge) ![GitHub stars](https://img.shields.io/github/stars/shivamverma30/AI-Based-Blood-Group-Prediction-Using-Fingerprint-Pattern-Analysis?style=for-the-badge&logo=github)
+
 ## 1. Project Title
 **AI-Based Blood Group Prediction Using Fingerprint Pattern Analysis (HemoScan AI)**
 
