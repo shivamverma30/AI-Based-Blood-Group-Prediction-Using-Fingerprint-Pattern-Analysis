@@ -12,6 +12,10 @@ from io import BytesIO
 from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing import image as keras_image
 from PIL import Image
+import torch
+import torch.nn.functional as torch_f
+from torchvision.models import swin_t
+from torchvision import transforms as torch_transforms
 
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage, Table, TableStyle, HRFlowable, KeepTogether
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -20,8 +24,8 @@ from reportlab.lib.units import inch, mm
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
-from tensorflow.keras.applications.resnet50 import preprocess_input
-from tensorflow.keras.applications.vgg16 import preprocess_input
+from tensorflow.keras.applications.resnet50 import preprocess_input as resnet_preprocess
+from tensorflow.keras.applications.vgg16 import preprocess_input as vgg_preprocess
 
 
 # -------------------------------------------------
@@ -38,7 +42,7 @@ st.set_page_config(
     page_title="HemoScan AI | Blood Group Detection",
     page_icon="🩸",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 
@@ -85,11 +89,6 @@ def load_custom_css():
             font-size: 1.1rem;
             opacity: 0.9;
             margin-top: 0.5rem;
-        }
-        
-        /* Sidebar Styling */
-        .css-1d391kg {
-            background: linear-gradient(180deg, #2C3E50 0%, #1A252F 100%);
         }
         
         /* Card Styling */
@@ -147,16 +146,30 @@ def load_custom_css():
         
         /* File Uploader Styling */
         .stFileUploader {
-            background: white;
+            background: linear-gradient(145deg, #1c2331, #0f172a);
             border: 2px dashed #C41E3A;
             border-radius: 12px;
             padding: 2rem;
             text-align: center;
+            transition: all 0.3s ease;
         }
         
         .stFileUploader:hover {
-            border-color: #8B0000;
-            background: #FFF5F5;
+            border-color: #ff4d4d;
+            background: linear-gradient(145deg, #20293b, #111827);
+            box-shadow: 0 0 15px rgba(196, 30, 58, 0.4);
+        }
+
+        [data-testid="stFileUploaderDropzone"] {
+            background: rgba(255,255,255,0.03);
+            border-radius: 10px;
+            padding: 1.5rem;
+        }
+
+        [data-testid="stFileUploaderFile"] {
+            background: #111827;
+            border-radius: 8px;
+            padding: 8px;
         }
         
         /* Input Fields */
@@ -247,15 +260,6 @@ def load_custom_css():
             animation: fadeIn 0.6s ease-out;
         }
         
-        /* Sidebar Info Cards */
-        .sidebar-card {
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 10px;
-            padding: 1rem;
-            margin: 1rem 0;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-        
         /* Hide Streamlit Branding */
         #MainMenu {visibility: hidden;}
         footer {visibility: hidden;}
@@ -280,18 +284,41 @@ def validate_email(email):
 # -------------------------------------------------
 def predict_blood_group(model, uploaded_file, input_size, class_labels):
     try:
-        img = keras_image.load_img(uploaded_file, target_size=input_size)
-        img_array = keras_image.img_to_array(img)
+        # Keras/TensorFlow path (existing behavior)
+        if hasattr(model, "predict"):
+            img = keras_image.load_img(uploaded_file, target_size=input_size)
+            img_array = keras_image.img_to_array(img)
+            img_array = np.expand_dims(img_array, axis=0)
 
-        img_array = np.expand_dims(img_array, axis=0)
+            #IMPORTANT CHANGE
+            if "resnet" in str(type(model)).lower():
+                img_array = resnet_preprocess(img_array)
+            else:
+                img_array = vgg_preprocess(img_array)
+            predictions = model.predict(img_array, verbose=0)
+            pred_index = np.argmax(predictions)
+            confidence = predictions[0][pred_index] * 100
+        else:
+            # PyTorch path (.pth Swin Transformer) — EXACT same as training notebook
+            uploaded_file.seek(0)
+            img = Image.open(uploaded_file).convert("RGB")
+            transform = torch_transforms.Compose([
+                torch_transforms.Resize((224, 224)),
+                torch_transforms.ToTensor(),
+                torch_transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.224, 0.225]
+                )
+            ])
+            img_tensor = transform(img)
+            xb = img_tensor.unsqueeze(0)
+            model.eval()
+            with torch.no_grad():
+                outputs = model(xb)
+                probs = torch.softmax(outputs, dim=1)
+            pred_index = torch.argmax(probs, dim=1).item()
+            confidence = probs[0][pred_index].item() * 100
 
-        #IMPORTANT CHANGE
-        img_array = preprocess_input(img_array)
-
-        predictions = model.predict(img_array, verbose=0)
-
-        pred_index = np.argmax(predictions)
-        confidence = predictions[0][pred_index] * 100
         predicted_label = class_labels[pred_index]
 
         return predicted_label, confidence, None
@@ -308,217 +335,249 @@ def generate_pdf(user_data, predicted_label, confidence, uploaded_file):
         doc = SimpleDocTemplate(
             temp_pdf.name,
             pagesize=letter,
-            rightMargin=50,
-            leftMargin=50,
-            topMargin=40,
-            bottomMargin=30
+            rightMargin=42,
+            leftMargin=42,
+            topMargin=30,
+            bottomMargin=24
         )
-        
+
         elements = []
-        
-        # Custom Styles
+
+        report_timestamp = datetime.now()
+        report_id = f"HS-{report_timestamp.strftime('%Y%m%d%H%M%S')}"
+
+        # Typography system
         styles = getSampleStyleSheet()
-        
-        # Compact Header Style
-        header_style = ParagraphStyle(
-            'CustomHeader',
+
+        header_title_style = ParagraphStyle(
+            'HeaderTitle',
             parent=styles['Heading1'],
-            fontSize=20,
-            textColor=colors.HexColor('#8B0000'),
-            spaceAfter=8,
-            alignment=TA_CENTER,
-            fontName='Helvetica-Bold'
-        )
-        
-        # Subheader Style
-        subheader_style = ParagraphStyle(
-            'CustomSubheader',
-            parent=styles['Heading2'],
-            fontSize=11,
-            textColor=colors.HexColor('#2C3E50'),
-            spaceAfter=6,
-            fontName='Helvetica-Bold'
-        )
-        
-        # Normal Text Style
-        normal_style = ParagraphStyle(
-            'CustomNormal',
-            parent=styles['Normal'],
-            fontSize=9,
-            textColor=colors.HexColor('#2C3E50'),
-            spaceAfter=3,
-            fontName='Helvetica'
-        )
-        
-        # Compact Result Style
-        result_style = ParagraphStyle(
-            'ResultStyle',
-            parent=styles['Normal'],
-            fontSize=28,
+            fontSize=21,
             textColor=colors.HexColor('#C41E3A'),
             alignment=TA_CENTER,
             fontName='Helvetica-Bold',
-            spaceAfter=4
-        )
-        
-        # Small Result Style for label
-        result_label_style = ParagraphStyle(
-            'ResultLabelStyle',
-            parent=styles['Normal'],
-            fontSize=10,
-            textColor=colors.HexColor('#666666'),
-            alignment=TA_CENTER,
-            fontName='Helvetica',
+            leading=24,
             spaceAfter=2
         )
-        
-        # Disclaimer Style - Compact
-        disclaimer_style = ParagraphStyle(
-            'Disclaimer',
-            parent=styles['Italic'],
-            fontSize=7,
-            textColor=colors.HexColor('#7F8C8D'),
+
+        header_subtitle_style = ParagraphStyle(
+            'HeaderSubtitle',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=colors.HexColor('#5E6A71'),
             alignment=TA_CENTER,
+            fontName='Helvetica',
+            leading=12,
+            spaceAfter=8
+        )
+
+        section_title_style = ParagraphStyle(
+            'SectionTitle',
+            parent=styles['Heading2'],
+            fontSize=11.5,
+            textColor=colors.HexColor('#2C3E50'),
+            fontName='Helvetica-Bold',
+            spaceAfter=6,
+            leading=13
+        )
+
+        body_label_style = ParagraphStyle(
+            'BodyLabel',
+            parent=styles['Normal'],
+            fontSize=8.7,
+            textColor=colors.HexColor('#2F3E46'),
+            fontName='Helvetica-Bold',
+            leading=11,
+            spaceAfter=0
+        )
+
+        body_value_style = ParagraphStyle(
+            'BodyValue',
+            parent=styles['Normal'],
+            fontSize=8.7,
+            textColor=colors.HexColor('#2C3E50'),
+            fontName='Helvetica',
+            leading=11,
+            spaceAfter=0
+        )
+
+        result_title_style = ParagraphStyle(
+            'ResultTitle',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=colors.HexColor('#6C757D'),
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold',
+            leading=12,
             spaceAfter=3
         )
-        
-        # Signature Style
+
+        result_value_style = ParagraphStyle(
+            'ResultValue',
+            parent=styles['Normal'],
+            fontSize=31,
+            textColor=colors.HexColor('#8B0000'),
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold',
+            leading=32,
+            spaceAfter=2
+        )
+
+        result_conf_style = ParagraphStyle(
+            'ResultConf',
+            parent=styles['Normal'],
+            fontSize=11,
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold',
+            leading=13,
+            spaceAfter=0
+        )
+
+        disclaimer_style = ParagraphStyle(
+            'Disclaimer',
+            parent=styles['Normal'],
+            fontSize=7.1,
+            textColor=colors.HexColor('#606D75'),
+            alignment=TA_CENTER,
+            fontName='Helvetica-Oblique',
+            leading=9,
+            spaceAfter=4
+        )
+
         signature_style = ParagraphStyle(
             'Signature',
             parent=styles['Normal'],
-            fontSize=8,
+            fontSize=7.8,
             textColor=colors.HexColor('#2C3E50'),
             alignment=TA_CENTER,
-            spaceAfter=2
+            spaceAfter=1,
+            leading=9
         )
 
-        # --- HEADER SECTION ---
-        # Red Cross Symbol
-        elements.append(Paragraph(
-            "<font size='23' color='#C41E3A'>✚</font>", 
-            ParagraphStyle('Logo', alignment=TA_CENTER, leading=20,spaceAfter=4)
-        ))
-        
-        elements.append(Paragraph("HEMOSCAN AI", header_style))
-        elements.append(Paragraph("Advanced Blood Group Detection System", 
-                                  ParagraphStyle('SubTitle', alignment=TA_CENTER, 
-                                               textColor=colors.HexColor('#7F8C8D'), 
-                                               fontSize=10, spaceAfter=10)))
-        
-        # Horizontal Line
-        elements.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#C41E3A'), spaceAfter=10))
-        
-        # --- CERTIFICATE TITLE ---
-        elements.append(Paragraph("<b>MEDICAL ANALYSIS REPORT</b>", 
-                                  ParagraphStyle('CertTitle', alignment=TA_CENTER, 
-                                               fontSize=12, textColor=colors.HexColor('#2C3E50'),
-                                               spaceAfter=10)))
-        
-        # --- PATIENT DETAILS TABLE - Compact ---
-        elements.append(Paragraph("Patient Information", subheader_style))
-        
+        # ---------- Header ----------
+        elements.append(Paragraph("<font color='#C41E3A' size='20'>✚</font>", ParagraphStyle(
+            'Logo', parent=styles['Normal'], alignment=TA_CENTER, leading=16, spaceAfter=2
+        )))
+        elements.append(Paragraph("HEMOSCAN AI", header_title_style))
+        elements.append(Paragraph("Blood Group Detection Report", header_subtitle_style))
+        elements.append(HRFlowable(width="100%", thickness=1.3, color=colors.HexColor('#C41E3A'), spaceAfter=8))
+
+        # ---------- Patient Information ----------
+        elements.append(Paragraph("Patient Information", section_title_style))
+
         table_data = [
-            [Paragraph("<b>Full Name</b>", normal_style), user_data["name"]],
-            [Paragraph("<b>Age</b>", normal_style), str(user_data["age"])],
-            [Paragraph("<b>Gender</b>", normal_style), user_data["gender"]],
-            [Paragraph("<b>Contact</b>", normal_style), user_data["phone"]],
-            [Paragraph("<b>Email</b>", normal_style), user_data["email"]],
-            [Paragraph("<b>Date</b>", normal_style), datetime.now().strftime("%Y-%m-%d %H:%M")],
-            [Paragraph("<b>Report ID</b>", normal_style), f"HS-{datetime.now().strftime('%Y%m%d%H%M%S')}"]
+            [Paragraph("Full Name", body_label_style), Paragraph(str(user_data["name"]), body_value_style)],
+            [Paragraph("Age", body_label_style), Paragraph(str(user_data["age"]), body_value_style)],
+            [Paragraph("Gender", body_label_style), Paragraph(str(user_data["gender"]), body_value_style)],
+            [Paragraph("Phone", body_label_style), Paragraph(str(user_data["phone"]), body_value_style)],
+            [Paragraph("Email", body_label_style), Paragraph(str(user_data["email"]), body_value_style)],
+            [Paragraph("Report Date", body_label_style), Paragraph(report_timestamp.strftime("%Y-%m-%d %H:%M:%S"), body_value_style)],
+            [Paragraph("Report ID", body_label_style), Paragraph(report_id, body_value_style)]
         ]
 
-        patient_table = Table(table_data, colWidths=[1.3*inch, 2.2*inch])
+        patient_table = Table(table_data, colWidths=[1.55*inch, 4.2*inch])
         patient_table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (0, -1), colors.HexColor('#F8F9FA')),
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor('#FBFCFD')),
+            ("ROWBACKGROUNDS", (0, 0), (-1, -1), [colors.HexColor('#F5F7F9'), colors.white]),
             ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor('#2C3E50')),
             ("ALIGN", (0, 0), (-1, -1), "LEFT"),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, -1), 8),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-            ("TOPPADDING", (0, 0), (-1, -1), 4),
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor('#DEE2E6')),
-            ("BOX", (0, 0), (-1, -1), 1, colors.HexColor('#C41E3A')),
+            ("LEFTPADDING", (0, 0), (-1, -1), 7),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("INNERGRID", (0, 0), (-1, -1), 0.45, colors.HexColor('#D7DEE4')),
+            ("BOX", (0, 0), (-1, -1), 1.1, colors.HexColor('#C41E3A')),
         ]))
-        
+
         elements.append(patient_table)
-        elements.append(Spacer(1, 0.15*inch))
-        
-        # --- ANALYSIS RESULTS SECTION - Side by Side ---
-        elements.append(Paragraph("Analysis Results", subheader_style))
-        
-        # Result Box with Background - Compact side by side
-        result_data = [[
-            Paragraph("<b>Blood Group</b>", result_label_style),
-            Paragraph("<b>Confidence</b>", result_label_style)
-        ], [
-            Paragraph(f"{predicted_label}", result_style),
-            Paragraph(f"{confidence:.1f}%", result_style)
-        ]]
-        
-        result_table = Table(result_data, colWidths=[1.8*inch, 1.8*inch],rowHeights=[0.45*inch, 0.65*inch])
+        elements.append(Spacer(1, 0.12*inch))
+
+        # ---------- Result Section ----------
+        elements.append(Paragraph("AI Prediction Result", section_title_style))
+
+        if confidence >= 90:
+            conf_color = colors.HexColor('#1B8A3C')
+            conf_text = "High Confidence"
+        elif confidence >= 70:
+            conf_color = colors.HexColor('#D9822B')
+            conf_text = "Medium Confidence"
+        else:
+            conf_color = colors.HexColor('#B42318')
+            conf_text = "Low Confidence"
+
+        confidence_para = Paragraph(
+            f"<font color='{conf_color.hexval()}'>Confidence: {confidence:.2f}% ({conf_text})</font>",
+            result_conf_style
+        )
+
+        result_table = Table([
+            [Paragraph("Predicted Blood Group", result_title_style)],
+            [Paragraph(f"{predicted_label}", result_value_style)],
+            [confidence_para],
+        ], colWidths=[5.75*inch], rowHeights=[0.30*inch, 0.56*inch, 0.30*inch])
         result_table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor('#FFF5F5')),
-            ("BOX", (0, 0), (-1, -1), 1.5, colors.HexColor('#C41E3A')),
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor('#FFF3F3')),
+            ("BOX", (0, 0), (-1, -1), 1.4, colors.HexColor('#C41E3A')),
             ("ALIGN", (0, 0), (-1, -1), "CENTER"),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("TOPPADDING", (0, 0), (-1, 0), 6),
-            ("BOTTOMPADDING", (0, 0), (-1, 0), 4),
-            ("TOPPADDING", (0, 1), (-1, 1), 4),
-            ("BOTTOMPADDING", (0, 1), (-1, 1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ]))
-        
+
         elements.append(result_table)
-        elements.append(Spacer(1, 0.15*inch))
-        
-        # --- FINGERPRINT IMAGE - Smaller ---
-        elements.append(Paragraph("Fingerprint Sample", subheader_style))
-        
-        # Process image for PDF - smaller size
+        elements.append(Spacer(1, 0.12*inch))
+
+        # ---------- Fingerprint Image ----------
+        elements.append(Paragraph("Fingerprint Sample", section_title_style))
+
         temp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
         img = Image.open(uploaded_file)
-        # Resize to smaller dimensions for PDF
-        img.thumbnail((150, 150), Image.Resampling.LANCZOS)
+        img.thumbnail((175, 175), Image.Resampling.LANCZOS)
         img.save(temp_img.name, quality=90)
-        
-        # Center the image - smaller
-        img_table = Table([[RLImage(temp_img.name, width=1.2*inch, height=1.2*inch)]], colWidths=[3.5*inch])
+
+        img_table = Table(
+            [[RLImage(temp_img.name, width=1.35*inch, height=1.35*inch)]],
+            colWidths=[5.75*inch],
+            rowHeights=[1.55*inch]
+        )
         img_table.setStyle(TableStyle([
             ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor('#DEE2E6')),
-            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor('#F8F9FA')),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("BOX", (0, 0), (-1, -1), 1.0, colors.HexColor('#CFD6DD')),
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor('#F9FAFB')),
         ]))
         elements.append(img_table)
-        
-        elements.append(Spacer(1, 0.2*inch))
-        
-        # --- DISCLAIMER SECTION ---
-        elements.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#DEE2E6'), spaceBefore=6, spaceAfter=6))
-        
+        elements.append(Spacer(1, 0.13*inch))
+
+        # ---------- Footer ----------
+        elements.append(HRFlowable(width="100%", thickness=0.6, color=colors.HexColor('#D9E0E6'), spaceBefore=2, spaceAfter=6))
+
         disclaimer_text = """
         <b>Disclaimer:</b> This report is generated by an AI-based system for informational purposes only. 
         It should not be used as a substitute for professional medical diagnosis or laboratory testing. 
         Always consult with qualified healthcare professionals for medical decisions.
         """
         elements.append(Paragraph(disclaimer_text, disclaimer_style))
-        
-        # --- FOOTER / SIGNATURE ---
-        elements.append(Spacer(1, 0.1*inch))
-        elements.append(HRFlowable(width="35%", thickness=0.5, color=colors.HexColor('#2C3E50'), 
-                                  spaceBefore=6, spaceAfter=4, hAlign='CENTER'))
+
+        elements.append(HRFlowable(width="36%", thickness=0.5, color=colors.HexColor('#2C3E50'),
+                                   spaceBefore=4, spaceAfter=3, hAlign='CENTER'))
         elements.append(Paragraph("Made with ❤️ by Shivam Verma and Anshu Raj", signature_style))
-        elements.append(Paragraph("Under the guidance of Dr. Kuldeep Yadav", 
-                                  ParagraphStyle('Guide', parent=signature_style, 
-                                               textColor=colors.HexColor('#7F8C8D'))))
-        elements.append(Paragraph("© 2026 HemoScan AI", 
-                                  ParagraphStyle('Copyright', parent=signature_style, 
-                                               textColor=colors.HexColor('#95A5A6'), fontSize=7)))
-        
+        elements.append(Paragraph(
+            "Under the guidance of Dr. Kuldeep Yadav",
+            ParagraphStyle('Guide', parent=signature_style, textColor=colors.HexColor('#6F7A82'))
+        ))
+        elements.append(Paragraph(
+            "© 2026 HemoScan AI",
+            ParagraphStyle('Copyright', parent=signature_style, textColor=colors.HexColor('#95A5A6'), fontSize=7)
+        ))
+
         # Build PDF
         doc.build(elements)
-        
+
         return temp_pdf.name
-        
+
     except Exception as e:
         st.error(f"PDF Generation Error: {str(e)}")
         return None
@@ -614,11 +673,14 @@ MODEL_FOLDER = "models"
 if not os.path.exists(MODEL_FOLDER):
     os.makedirs(MODEL_FOLDER)
 
-# Get all .keras model files
-models_list = [f for f in os.listdir(MODEL_FOLDER) if f.endswith(".keras")]
+# Get all supported model files
+models_list = [
+    f for f in os.listdir(MODEL_FOLDER)
+    if f.endswith(".keras") or f.endswith(".pth")
+]
 
 if len(models_list) == 0:
-    st.error("⚠️ No models found in /models folder. Please add .keras model files.")
+    st.error("⚠️ No models found in /models folder. Please add .keras or .pth model files.")
     st.stop()
 
 # Model configurations - Add your models here
@@ -634,52 +696,10 @@ AVAILABLE_MODELS = {
 for model_file in models_list:
     if model_file not in AVAILABLE_MODELS:
         AVAILABLE_MODELS[model_file] = {
-            "name": model_file.replace(".keras", "").replace("_", " ").title(),
+            "name": model_file.replace(".keras", "").replace(".pth", "").replace("_", " ").title(),
             "input_size": None,
             "classes": ['A+', 'A-', 'AB+', 'AB-', 'B+', 'B-', 'O+', 'O-']
         }
-
-
-# -------------------------------------------------
-# Sidebar Configuration
-# -------------------------------------------------
-with st.sidebar:
-    st.markdown("""
-    <div style="text-align: center; padding: 1rem 0;">
-        <h1 style="color: white; font-size: 1.8rem; margin: 0;">🩸 HemoScan</h1>
-        <p style="color: #B0B0B0; font-size: 0.9rem; margin: 0.5rem 0 0 0;">AI-Powered Blood Analysis</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    st.markdown("---")
-    
-    # System Status Card
-    st.markdown("""
-    <div class="sidebar-card">
-        <h3 style="color: white; margin: 0 0 1rem 0; font-size: 1rem;">⚙️ System Status</h3>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    st.success(f"✅ {len(models_list)} Models Available")
-    st.info(f"📁 Folder: /{MODEL_FOLDER}")
-    
-    st.markdown("---")
-    
-    # Quick Stats
-    st.markdown("""
-    <div class="sidebar-card">
-        <h3 style="color: white; margin: 0 0 1rem 0; font-size: 1rem;">📈 Quick Stats</h3>
-        <p style="color: #B0B0B0; margin: 0.5rem 0; font-size: 0.9rem;">
-           Accuracy: <span style="color: #2ECC71;">95%</span>
-        </p>
-        <p style="color: #B0B0B0; margin: 0.5rem 0; font-size: 0.9rem;">
-           Processing: <span style="color: #2ECC71;"><2s</span>
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    st.markdown("---")
-    st.caption("© 2026 HemoScan AI")
 
 
 # -------------------------------------------------
@@ -688,7 +708,7 @@ with st.sidebar:
 st.markdown("""
 <div class="medical-header animate-in">
     <h1>🩸 Blood Group Detection System</h1>
-    <p>Advanced AI-based Fingerprint Analysis for Medical Applications</p>
+    <p>AI-Based Blood Group Prediction Using Fingerprint Pattern Analysis</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -719,7 +739,59 @@ with model_col1:
 @st.cache_resource(show_spinner=False)
 def load_model_cached(model_path):
     try:
-        return load_model(model_path, compile=False)
+        if model_path.endswith(".keras"):
+            return load_model(model_path, compile=False)
+
+        if model_path.endswith(".pth"):
+            default_classes = ['A+', 'A-', 'AB+', 'AB-', 'B+', 'B-', 'O+', 'O-']
+            num_classes = len(default_classes)
+
+            checkpoint = torch.load(model_path, map_location="cpu")
+
+            if isinstance(checkpoint, dict):
+                if "model_state_dict" in checkpoint:
+                    state_dict = checkpoint["model_state_dict"]
+                elif "state_dict" in checkpoint:
+                    state_dict = checkpoint["state_dict"]
+                else:
+                    state_dict = checkpoint
+            else:
+                state_dict = checkpoint
+
+            # Remove common wrapper prefixes if present.
+            cleaned_state_dict = {}
+            for k, v in state_dict.items():
+                new_key = k
+                if new_key.startswith("module."):
+                    new_key = new_key[len("module."):]
+                if new_key.startswith("model."):
+                    new_key = new_key[len("model."):]
+                cleaned_state_dict[new_key] = v
+
+            # Infer number of classes from final head if available.
+            if "head.weight" in cleaned_state_dict and len(cleaned_state_dict["head.weight"].shape) == 2:
+                num_classes = int(cleaned_state_dict["head.weight"].shape[0])
+
+            class NetWrapper(torch.nn.Module):
+                def __init__(self, backbone):
+                    super().__init__()
+                    self.backbone = backbone
+
+                def forward(self, x):
+                    return self.backbone(x)
+
+            backbone = swin_t(weights=None)
+            in_features = backbone.head.in_features
+            backbone.head = torch.nn.Linear(in_features, num_classes)
+
+            torch_model = NetWrapper(backbone)
+
+            torch_model.load_state_dict(cleaned_state_dict, strict=False)
+            torch_model.eval()
+
+            return torch_model
+
+        raise ValueError("Unsupported model file extension")
     except Exception as e:
         st.error(f"Error loading model: {str(e)}")
         return None
@@ -731,27 +803,40 @@ if model is None:
     st.stop()
 
 # Auto-detect input size from model
-model_input_shape = model.input_shape
-if model_input_shape and len(model_input_shape) >= 3:
-    input_size = (model_input_shape[1], model_input_shape[2])
+if hasattr(model, "input_shape"):
+    model_input_shape = model.input_shape
+    if model_input_shape and len(model_input_shape) >= 3:
+        input_size = (model_input_shape[1], model_input_shape[2])
+    else:
+        input_size = (224, 224)
 else:
     input_size = (224, 224)
 
 # Get class labels from model output or use default
-model_output_shape = model.output_shape
-if model_output_shape and len(model_output_shape) >= 2:
-    num_classes = model_output_shape[1]
-    default_classes = ['A+', 'A-', 'AB+', 'AB-', 'B+', 'B-', 'O+', 'O-']
-    if num_classes <= len(default_classes):
-        class_labels = default_classes[:num_classes]
+default_classes = ['A+', 'A-', 'AB+', 'AB-', 'B+', 'B-', 'O+', 'O-']
+if hasattr(model, "output_shape"):
+    model_output_shape = model.output_shape
+    if model_output_shape and len(model_output_shape) >= 2:
+        num_classes = model_output_shape[1]
+        if num_classes <= len(default_classes):
+            class_labels = default_classes[:num_classes]
+        else:
+            class_labels = [f"Class_{i}" for i in range(num_classes)]
     else:
-        class_labels = [f"Class_{i}" for i in range(num_classes)]
+        class_labels = default_classes
 else:
-    class_labels = ['A+', 'A-', 'AB+', 'AB-', 'B+', 'B-', 'O+', 'O-']
+    if hasattr(model, "head") and hasattr(model.head, "out_features"):
+        num_classes = int(model.head.out_features)
+        if num_classes <= len(default_classes):
+            class_labels = default_classes[:num_classes]
+        else:
+            class_labels = [f"Class_{i}" for i in range(num_classes)]
+    else:
+        class_labels = default_classes
 
 with model_col2:
     st.markdown("<br>", unsafe_allow_html=True)
-    st.success(f"✅ Loaded")
+    st.success(f" Loaded")
 
 # Display model info below selection
 info_col1, info_col2, info_col3 = st.columns(3)
@@ -796,15 +881,15 @@ with col1:
         with col_gender:
             gender = st.selectbox("Gender*", ["Male", "Female", "Other"])
         
-        phone = st.text_input("Phone Number*", placeholder="+1 (555) 000-0000")
-        email = st.text_input("Email Address*", placeholder="patient@example.com")
+        phone = st.text_input("Phone Number*", placeholder="(+91) 98765 43210")
+        email = st.text_input("Email Address*", placeholder="patient@gmail.com")
         
         st.markdown("---")
         
         uploaded_file = st.file_uploader(
-            "📤 Upload Fingerprint Image", 
+            "📤 Upload Fingerprint Image (Max 5MB)",
             type=["jpg", "jpeg", "png", "bmp"],
-            help="Upload a clear fingerprint image for analysis"
+            help="Upload a clear fingerprint image for analysis (Max size: 5MB)"
         )
         
         submitted = st.form_submit_button("🔬 Analyze Sample", use_container_width=True)
