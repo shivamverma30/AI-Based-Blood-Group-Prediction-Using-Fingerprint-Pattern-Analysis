@@ -578,10 +578,6 @@ def generate_pdf(user_data, predicted_label, confidence, uploaded_file):
                                    spaceBefore=4, spaceAfter=3, hAlign='CENTER'))
         elements.append(Paragraph("Made with ❤️ by Shivam Verma and Anshu Raj", signature_style))
         elements.append(Paragraph(
-            "Under the guidance of Dr. Kuldeep Yadav",
-            ParagraphStyle('Guide', parent=signature_style, textColor=colors.HexColor('#6F7A82'))
-        ))
-        elements.append(Paragraph(
             "© 2026 HemoScan AI",
             ParagraphStyle('Copyright', parent=signature_style, textColor=colors.HexColor('#95A5A6'), fontSize=7)
         ))
@@ -636,7 +632,6 @@ def send_email(receiver_email, pdf_path, user_name):
                         Best regards,<br>
                         <strong>HemoScan AI Team</strong><br>
                         Shivam Verma & Anshu Raj<br>
-                        Under the guidance of Dr. Kuldeep Yadav
                     </p>
                 </div>
             </div>
