@@ -1,7 +1,7 @@
 streamlit
 torch
 torchvision
-tensorflow
+# tensorflow removed for deployment
 pillow
 numpy
 reportlab
