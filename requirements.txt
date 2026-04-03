@@ -1,7 +1,8 @@
 streamlit
 torch
 torchvision
-# tensorflow removed for deployment
+# Optional for local .keras model support:
+# tensorflow
 pillow
 numpy
 reportlab
