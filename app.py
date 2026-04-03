@@ -9,8 +9,19 @@ from email.message import EmailMessage
 from datetime import datetime
 from io import BytesIO
 
-from tensorflow.keras.models import load_model
-from tensorflow.keras.preprocessing import image as keras_image
+TF_AVAILABLE = True
+try:
+    from tensorflow.keras.models import load_model
+    from tensorflow.keras.preprocessing import image as keras_image
+    from tensorflow.keras.applications.resnet50 import preprocess_input as resnet_preprocess
+    from tensorflow.keras.applications.vgg16 import preprocess_input as vgg_preprocess
+except ImportError:
+    TF_AVAILABLE = False
+    load_model = None
+    keras_image = None
+    resnet_preprocess = None
+    vgg_preprocess = None
+
 from PIL import Image
 import torch
 import torch.nn.functional as torch_f
@@ -28,8 +39,6 @@ from reportlab.lib.units import inch, mm
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
-from tensorflow.keras.applications.resnet50 import preprocess_input as resnet_preprocess
-from tensorflow.keras.applications.vgg16 import preprocess_input as vgg_preprocess
 
 
 # -------------------------------------------------
@@ -289,7 +298,7 @@ def validate_email(email):
 def predict_blood_group(model, uploaded_file, input_size, class_labels):
     try:
         # Keras/TensorFlow path (existing behavior)
-        if hasattr(model, "predict"):
+        if TF_AVAILABLE and hasattr(model, "predict"):
             img = keras_image.load_img(uploaded_file, target_size=input_size)
             img_array = keras_image.img_to_array(img)
             img_array = np.expand_dims(img_array, axis=0)
@@ -705,7 +714,7 @@ if not os.path.exists(MODEL_FOLDER):
 # Get all supported model files
 models_list = [
     f for f in os.listdir(MODEL_FOLDER)
-    if f.endswith(".keras") or f.endswith(".pth")
+    if f.endswith(".pth") or (TF_AVAILABLE and f.endswith(".keras"))
 ]
 
 # Cloud fallback: download Swin model when no local model is available.
@@ -713,7 +722,7 @@ if len(models_list) == 0:
     ensure_swin_model_available()
     models_list = [
         f for f in os.listdir(MODEL_FOLDER)
-        if f.endswith(".keras") or f.endswith(".pth")
+        if f.endswith(".pth") or (TF_AVAILABLE and f.endswith(".keras"))
     ]
 
 if len(models_list) == 0:
@@ -777,6 +786,9 @@ with model_col1:
 def load_model_cached(model_path):
     try:
         if model_path.endswith(".keras"):
+            if not TF_AVAILABLE:
+                st.error("TensorFlow is not installed. Please select a PyTorch (.pth) model.")
+                return None
             return load_model(model_path, compile=False)
 
         if model_path.endswith(".pth"):
