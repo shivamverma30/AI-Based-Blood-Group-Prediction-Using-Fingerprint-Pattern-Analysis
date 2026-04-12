@@ -6,4 +6,4 @@ torchvision
 pillow
 numpy
 reportlab
-gdown
+gdown==4.7.1
