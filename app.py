@@ -57,7 +57,7 @@ EMAIL_PASSWORD = st.secrets["EMAIL_PASSWORD"]
 # -------------------------------------------------
 st.set_page_config(
     page_title="HemoScan AI | Blood Group Detection",
-    page_icon="🩸",
+    page_icon="📋",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -472,7 +472,7 @@ def generate_pdf(user_data, predicted_label, confidence, uploaded_file):
         )
 
         # ---------- Header ----------
-        elements.append(Paragraph("<font color='#C41E3A' size='20'>✚</font>", ParagraphStyle(
+        elements.append(Paragraph("<font color='#C41E3A' size='20'>●</font>", ParagraphStyle(
             'Logo', parent=styles['Normal'], alignment=TA_CENTER, leading=16, spaceAfter=2
         )))
         elements.append(Paragraph("HEMOSCAN AI", header_title_style))
@@ -580,7 +580,7 @@ def generate_pdf(user_data, predicted_label, confidence, uploaded_file):
 
         elements.append(HRFlowable(width="36%", thickness=0.5, color=colors.HexColor('#2C3E50'),
                                    spaceBefore=4, spaceAfter=3, hAlign='CENTER'))
-        elements.append(Paragraph("Made with ❤️ by Shivam Verma and Anshu Raj", signature_style))
+        elements.append(Paragraph("Developed by Shivam Verma and Anshu Raj", signature_style))
         elements.append(Paragraph(
             "© 2026 HemoScan AI",
             ParagraphStyle('Copyright', parent=signature_style, textColor=colors.HexColor('#95A5A6'), fontSize=7)
@@ -613,7 +613,7 @@ def send_email(receiver_email, pdf_path, user_name):
             <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
                 <div style="background: linear-gradient(135deg, #C41E3A 0%, #8B0000 100%); 
                            color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
-                    <h1 style="margin: 0;">🩸 HemoScan AI</h1>
+                    <h1 style="margin: 0;">HemoScan AI</h1>
                     <p style="margin: 10px 0 0 0; opacity: 0.9;">Your Blood Group Analysis Report</p>
                 </div>
                 
@@ -696,7 +696,7 @@ def download_model_from_hf():
                 os.remove(SWIN_MODEL_PATH)
 
     try:
-        with st.spinner("⏳ Downloading Swin Transformer model from Hugging Face..."):
+        with st.spinner("Downloading Swin Transformer model from Hugging Face..."):
             repo_id = "shivamverma30/hemoscan-model"
             filename = "swin.pth"
 
@@ -749,12 +749,12 @@ def download_model_from_hf():
             if downloaded_path != SWIN_MODEL_PATH:
                 os.replace(downloaded_path, SWIN_MODEL_PATH)
 
-            st.success("✅ Model downloaded and validated successfully!")
+            st.success("Model downloaded and validated successfully.")
             return True
 
     except Exception as e:
-        st.error(f"❌ Failed to download Swin model: {str(e)}")
-        st.info("💡 Troubleshooting: Check your internet connection and verify the HF repo is accessible.")
+        st.error(f"Failed to download Swin model: {str(e)}")
+        st.info("Check your internet connection and verify the Hugging Face repository is accessible.")
         return False
 
 # Create models folder if it doesn't exist
@@ -776,7 +776,7 @@ if len(models_list) == 0:
     ]
 
 if len(models_list) == 0:
-    st.warning("⚠️ No models found in /models folder yet. The UI will still load, and the app will try Hugging Face when available.")
+    st.warning("No models found in the models folder. The interface will load, and the app will attempt to download models from Hugging Face.")
     models_list = [SWIN_MODEL_FILE]
 
 # Model configurations - Add your models here
@@ -803,7 +803,7 @@ for model_file in models_list:
 # -------------------------------------------------
 st.markdown("""
 <div class="medical-header animate-in">
-    <h1>🩸 Blood Group Detection System</h1>
+    <h1>Blood Group Detection System</h1>
     <p>AI-Based Blood Group Prediction Using Fingerprint Pattern Analysis</p>
 </div>
 """, unsafe_allow_html=True)
@@ -852,7 +852,7 @@ def load_model_cached(model_path):
                 with open(model_path, "rb") as f:
                     header = f.read(4)
                     if header[:2] != b'PK':  # ZIP file magic number (0x504B)
-                        st.error("❌ Model file is corrupted (invalid ZIP header). Attempting to redownload...")
+                        st.error("Model file is corrupted. Attempting to redownload.")
                         if os.path.exists(model_path):
                             os.remove(model_path)
                         if download_model_from_hf():
@@ -869,8 +869,8 @@ def load_model_cached(model_path):
             try:
                 checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
             except Exception as e:
-                st.error(f"❌ Failed to load checkpoint: {str(e)}")
-                st.info("💡 The model file appears corrupted. Attempting to redownload...")
+                st.error(f"Failed to load checkpoint: {str(e)}")
+                st.info("The model file appears corrupted. Attempting to redownload.")
                 if os.path.exists(model_path):
                     os.remove(model_path)
                 if download_model_from_hf():
@@ -922,7 +922,7 @@ def load_model_cached(model_path):
 
         raise ValueError("Unsupported model file extension")
     except Exception as e:
-        st.error(f"❌ Error loading model: {str(e)}")
+        st.error(f"Error loading model: {str(e)}")
         return None
 
 model_path = os.path.join(MODEL_FOLDER, selected_model_file)
@@ -988,7 +988,7 @@ col1, col2 = st.columns([1, 1], gap="large")
 with col1:
     st.markdown("""
     <div class="medical-card animate-in">
-        <h3 style="color: #C41E3A; margin-top: 0;">👤 Patient Information</h3>
+        <h3 style="color: #C41E3A; margin-top: 0;">Patient Information</h3>
     </div>
     """, unsafe_allow_html=True)
     
@@ -1006,14 +1006,14 @@ with col1:
     st.markdown("---")
 
     st.file_uploader(
-        "📤 Upload Fingerprint Image (Max 5MB)",
+        "Upload Fingerprint Image (Max 5MB)",
         type=["jpg", "jpeg", "png", "bmp"],
         help="Upload a clear fingerprint image for analysis (Max size: 5MB)",
         key="fingerprint_upload",
         on_change=persist_uploaded_file
     )
 
-    submitted = st.button("🔬 Analyze Sample", use_container_width=True)
+    submitted = st.button("Analyze Sample", use_container_width=True)
 
 
 # Handle Form Submission
@@ -1034,26 +1034,26 @@ if submitted:
     
     if validation_errors:
         for error in validation_errors:
-            st.error(f" {error}")
+            st.error(error)
         st.stop()
     
     if model is None:
         model = load_model_cached(model_path)
     
     if model is None:
-        st.info("Model not ready yet. The interface is available, but prediction will be disabled until a valid model is loaded.")
+        st.info("Model not ready. The interface is available, but prediction is disabled until a valid model is loaded.")
     else:
         # Clear previous email status on new submission
         st.session_state.email_status = None
         
         # Process Prediction
-        with st.spinner(" Analyzing fingerprint pattern..."):
+        with st.spinner("Analyzing fingerprint..."):
             predicted_label, confidence, error = predict_blood_group(
                 model, uploaded_file, input_size, class_labels
             )
         
         if error:
-            st.error(f" Analysis Error: {error}")
+            st.error(f"Analysis failed: {error}")
             st.stop()
         
         # Store Data
@@ -1081,7 +1081,7 @@ with col2:
         
         st.markdown("""
         <div class="medical-card animate-in">
-            <h3 style="color: #C41E3A; margin-top: 0;">📊 Analysis Results</h3>
+            <h3 style="color: #C41E3A; margin-top: 0;">Analysis Results</h3>
         </div>
         """, unsafe_allow_html=True)
         
@@ -1120,7 +1120,7 @@ with col2:
         st.progress(int(conf))
         
         # Image Preview
-        st.markdown("### 🔍 Sample Preview")
+        st.markdown("### Sample Preview")
         pred_data["file"].seek(0)
         img = Image.open(pred_data['file'])
         col1, col2, col3 = st.columns([1,2,1])
@@ -1129,7 +1129,7 @@ with col2:
         
         # Generate PDF
         if st.session_state.pdf_path is None:
-            with st.spinner("📄 Generating medical report..."):
+            with st.spinner("Generating report..."):
                 pred_data["file"].seek(0)
                 pdf_path = generate_pdf(user_data, pred_data['label'], 
                                        pred_data['confidence'], pred_data['file'])
@@ -1142,7 +1142,7 @@ with col2:
             with col_download:
                 with open(st.session_state.pdf_path, "rb") as f:
                     st.download_button(
-                        label="📥 Download Report",
+                        label="Download Report",
                         data=f,
                         file_name=f"HemoScan_Report_{user_data['name'].replace(' ', '_')}.pdf",
                         mime="application/pdf",
@@ -1150,7 +1150,7 @@ with col2:
                     )
             
             with col_email:
-                if st.button("📧 Email Report", use_container_width=True):
+                if st.button("Email Report", use_container_width=True):
                     with st.spinner("Sending email..."):
                         success, error_msg = send_email(
                             user_data['email'], 
@@ -1159,9 +1159,9 @@ with col2:
                         )
                         
                         if success:
-                            st.session_state.email_status = ("success", "✅ Report sent successfully!")
+                            st.session_state.email_status = ("success", "Report sent successfully.")
                         else:
-                            st.session_state.email_status = ("error", f"❌ {error_msg}")
+                            st.session_state.email_status = ("error", f"Error: {error_msg}")
         
         # Display email status message below buttons (no animation)
         if st.session_state.email_status:
@@ -1172,7 +1172,7 @@ with col2:
                 st.error(status_msg)
         
         # Reset Button
-        if st.button("🔄 New Analysis", type="secondary"):
+        if st.button("New Analysis", type="secondary"):
             st.session_state.pdf_path = None
             st.session_state.prediction_data = None
             st.session_state.user_data = None
