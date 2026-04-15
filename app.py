@@ -28,7 +28,13 @@ import torch.nn.functional as torch_f
 from torchvision.models import swin_t
 from torchvision import transforms as torch_transforms
 import requests
-from huggingface_hub import hf_hub_download, HfApi
+
+HF_HUB_AVAILABLE = True
+try:
+    from huggingface_hub import hf_hub_download
+except ImportError:
+    HF_HUB_AVAILABLE = False
+    hf_hub_download = None
 
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage, Table, TableStyle, HRFlowable, KeepTogether
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -680,62 +686,72 @@ SWIN_MODEL_PATH = os.path.join(MODEL_FOLDER, SWIN_MODEL_FILE)
 
 
 def download_model_from_hf():
-    """
-    Download Swin Transformer model from Hugging Face using the official huggingface_hub library.
-    This ensures proper file integrity, resumable downloads, and proper error handling.
-    """
+    """Download the Swin Transformer checkpoint from Hugging Face safely."""
     if os.path.exists(SWIN_MODEL_PATH):
-        # Validate existing file is actually a PyTorch checkpoint
         try:
-            with open(SWIN_MODEL_PATH, "rb") as f:
-                header = f.read(2)
-                if header != b'PK':  # ZIP file magic number
-                    st.warning("Corrupted model file detected. Redownloading...")
-                    os.remove(SWIN_MODEL_PATH)
-                else:
-                    return True
-        except Exception as e:
-            st.warning(f"Cannot validate existing model: {str(e)}. Redownloading...")
+            torch.load(SWIN_MODEL_PATH, map_location="cpu", weights_only=False)
+            return True
+        except Exception:
             if os.path.exists(SWIN_MODEL_PATH):
                 os.remove(SWIN_MODEL_PATH)
 
     try:
         with st.spinner("⏳ Downloading Swin Transformer model from Hugging Face..."):
-            # Parse HF repo URL
             repo_id = "shivamverma30/hemoscan-model"
             filename = "swin.pth"
 
-            # Use official huggingface_hub library for robust download
-            downloaded_path = hf_hub_download(
-                repo_id=repo_id,
-                filename=filename,
-                cache_dir=None,  # Use default HF cache, then we'll copy to local
-                force_download=False,
-                resume_download=True,
-                local_dir=MODEL_FOLDER,
-                local_dir_use_symlinks=False
-            )
+            downloaded_path = None
+            download_errors = []
 
-            # Validate downloaded file
-            if os.path.exists(downloaded_path):
-                # Verify it's a valid PyTorch file
+            if HF_HUB_AVAILABLE:
                 try:
-                    with open(downloaded_path, "rb") as f:
-                        header = f.read(2)
-                        if header != b'PK':
-                            raise ValueError("Downloaded file is not a valid PyTorch checkpoint (missing ZIP header)")
-                    
-                    # Try a quick torch.load to validate
-                    test_load = torch.load(downloaded_path, map_location="cpu", weights_only=False)
-                    st.success("✅ Model downloaded and validated successfully!")
-                    return True
+                    downloaded_path = hf_hub_download(
+                        repo_id=repo_id,
+                        filename=filename,
+                        local_dir=MODEL_FOLDER,
+                        local_dir_use_symlinks=False,
+                        resume_download=True,
+                    )
                 except Exception as e:
+                    download_errors.append(str(e))
+
+            if downloaded_path is None:
+                download_url = SWIN_MODEL_URL if "download=true" in SWIN_MODEL_URL else f"{SWIN_MODEL_URL}?download=true"
+                temp_file = tempfile.NamedTemporaryFile(delete=False, dir=MODEL_FOLDER, suffix=".tmp")
+                downloaded_path = temp_file.name
+                temp_file.close()
+
+                try:
+                    response = requests.get(download_url, stream=True, timeout=120, allow_redirects=True)
+                    response.raise_for_status()
+
+                    content_type = response.headers.get("content-type", "").lower()
+                    if "html" in content_type:
+                        raise ValueError("Hugging Face returned HTML instead of a model file.")
+
+                    with open(downloaded_path, "wb") as model_file:
+                        for chunk in response.iter_content(chunk_size=8192):
+                            if chunk:
+                                model_file.write(chunk)
+                except Exception as e:
+                    download_errors.append(str(e))
                     if os.path.exists(downloaded_path):
                         os.remove(downloaded_path)
-                    raise ValueError(f"Downloaded file is corrupted: {str(e)}")
-            else:
-                raise FileNotFoundError(f"Model file not found at {downloaded_path}")
-                
+                    raise ValueError("; ".join(download_errors))
+
+            try:
+                torch.load(downloaded_path, map_location="cpu", weights_only=False)
+            except Exception as e:
+                if os.path.exists(downloaded_path):
+                    os.remove(downloaded_path)
+                raise ValueError(f"Downloaded file is corrupted: {str(e)}")
+
+            if downloaded_path != SWIN_MODEL_PATH:
+                os.replace(downloaded_path, SWIN_MODEL_PATH)
+
+            st.success("✅ Model downloaded and validated successfully!")
+            return True
+
     except Exception as e:
         st.error(f"❌ Failed to download Swin model: {str(e)}")
         st.info("💡 Troubleshooting: Check your internet connection and verify the HF repo is accessible.")
@@ -913,7 +929,7 @@ model_path = os.path.join(MODEL_FOLDER, selected_model_file)
 model = load_model_cached(model_path)
 
 if model is None:
-    st.stop()
+    st.warning("Model could not be loaded. The rest of the UI will still render, but prediction will stay disabled until a valid model is available.")
 
 # Auto-detect input size from model
 if hasattr(model, "input_shape"):
@@ -1010,6 +1026,10 @@ with col1:
 
 # Handle Form Submission
 if submitted:
+    if model is None:
+        st.error("No valid model is loaded. Please select a working model or ensure the checkpoint in /models is valid.")
+        st.stop()
+
     # Validation
     validation_errors = []
     
