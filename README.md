@@ -68,6 +68,8 @@ The table below provides a template for reporting comparative model performance.
 
 Based on experimentation, Swin Transformer achieved the highest predictive accuracy and was selected for deployment in the live system.
 
+**Note:** The Swin Transformer model is hosted on Hugging Face Hub for reliable access; previously it was loaded from Google Drive but has been migrated to Hugging Face to ensure better availability and download reliability.
+
 ## 8. Project Architecture
 The end-to-end pipeline is as follows:
 

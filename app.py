@@ -678,22 +678,57 @@ SWIN_MODEL_URL = "https://huggingface.co/shivamverma30/hemoscan-model/resolve/ma
 SWIN_MODEL_PATH = os.path.join(MODEL_FOLDER, SWIN_MODEL_FILE)
 
 
-def download_model_from_hf():
+def download_model_from_hf(max_retries=3):
     if os.path.exists(SWIN_MODEL_PATH):
         return True
 
-    try:
-        with st.spinner("Downloading Swin Transformer model for deployment..."):
-            response = requests.get(SWIN_MODEL_URL, stream=True, timeout=60)
-            response.raise_for_status()
-            with open(SWIN_MODEL_PATH, "wb") as model_file:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        model_file.write(chunk)
-        return os.path.exists(SWIN_MODEL_PATH)
-    except Exception as e:
-        st.error(f"⚠️ Failed to download Swin model: {str(e)}")
-        return False
+    # Fix: Add ?download=true to force binary download from HuggingFace
+    hf_url = SWIN_MODEL_URL + "?download=true" if "?" not in SWIN_MODEL_URL else SWIN_MODEL_URL
+
+    for attempt in range(max_retries):
+        try:
+            with st.spinner(f"Downloading Swin Transformer model ({attempt + 1}/{max_retries})..."):
+                response = requests.get(hf_url, stream=True, timeout=120, allow_redirects=True)
+                response.raise_for_status()
+
+                # Get content length for validation
+                total_size = int(response.headers.get('content-length', 0))
+
+                # Validate response is not HTML error page
+                content_type = response.headers.get('content-type', '').lower()
+                if 'html' in content_type:
+                    raise ValueError("HuggingFace returned HTML instead of binary file. URL may be incorrect.")
+
+                # Download with size validation
+                downloaded_size = 0
+                with open(SWIN_MODEL_PATH, "wb") as model_file:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            model_file.write(chunk)
+                            downloaded_size += len(chunk)
+
+                # Validate file was completely downloaded
+                if total_size > 0 and downloaded_size < total_size * 0.99:  # Allow 1% margin for content-length header variations
+                    if os.path.exists(SWIN_MODEL_PATH):
+                        os.remove(SWIN_MODEL_PATH)
+                    raise ValueError(f"Incomplete download: {downloaded_size}/{total_size} bytes")
+
+                # Validate it's actually a PyTorch file (should start with binary data, not HTML)
+                with open(SWIN_MODEL_PATH, "rb") as f:
+                    header = f.read(6)
+                    if header.startswith(b'<'):  # HTML files start with < (e.g., <!DOCTYPE)
+                        if os.path.exists(SWIN_MODEL_PATH):
+                            os.remove(SWIN_MODEL_PATH)
+                        raise ValueError("Downloaded file appears to be HTML instead of PyTorch model")
+
+                return os.path.exists(SWIN_MODEL_PATH)
+        except Exception as e:
+            if os.path.exists(SWIN_MODEL_PATH):
+                os.remove(SWIN_MODEL_PATH)
+            if attempt == max_retries - 1:
+                st.error(f"⚠️ Failed to download Swin model after {max_retries} attempts: {str(e)}")
+                return False
+            # Continue to next retry attempt
 
 # Create models folder if it doesn't exist
 if not os.path.exists(MODEL_FOLDER):
