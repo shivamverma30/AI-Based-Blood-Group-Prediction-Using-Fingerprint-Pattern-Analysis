@@ -28,6 +28,7 @@ import torch.nn.functional as torch_f
 from torchvision.models import swin_t
 from torchvision import transforms as torch_transforms
 import requests
+from huggingface_hub import hf_hub_download, HfApi
 
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage, Table, TableStyle, HRFlowable, KeepTogether
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -678,57 +679,67 @@ SWIN_MODEL_URL = "https://huggingface.co/shivamverma30/hemoscan-model/resolve/ma
 SWIN_MODEL_PATH = os.path.join(MODEL_FOLDER, SWIN_MODEL_FILE)
 
 
-def download_model_from_hf(max_retries=3):
+def download_model_from_hf():
+    """
+    Download Swin Transformer model from Hugging Face using the official huggingface_hub library.
+    This ensures proper file integrity, resumable downloads, and proper error handling.
+    """
     if os.path.exists(SWIN_MODEL_PATH):
-        return True
-
-    # Fix: Add ?download=true to force binary download from HuggingFace
-    hf_url = SWIN_MODEL_URL + "?download=true" if "?" not in SWIN_MODEL_URL else SWIN_MODEL_URL
-
-    for attempt in range(max_retries):
+        # Validate existing file is actually a PyTorch checkpoint
         try:
-            with st.spinner(f"Downloading Swin Transformer model ({attempt + 1}/{max_retries})..."):
-                response = requests.get(hf_url, stream=True, timeout=120, allow_redirects=True)
-                response.raise_for_status()
-
-                # Get content length for validation
-                total_size = int(response.headers.get('content-length', 0))
-
-                # Validate response is not HTML error page
-                content_type = response.headers.get('content-type', '').lower()
-                if 'html' in content_type:
-                    raise ValueError("HuggingFace returned HTML instead of binary file. URL may be incorrect.")
-
-                # Download with size validation
-                downloaded_size = 0
-                with open(SWIN_MODEL_PATH, "wb") as model_file:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        if chunk:
-                            model_file.write(chunk)
-                            downloaded_size += len(chunk)
-
-                # Validate file was completely downloaded
-                if total_size > 0 and downloaded_size < total_size * 0.99:  # Allow 1% margin for content-length header variations
-                    if os.path.exists(SWIN_MODEL_PATH):
-                        os.remove(SWIN_MODEL_PATH)
-                    raise ValueError(f"Incomplete download: {downloaded_size}/{total_size} bytes")
-
-                # Validate it's actually a PyTorch file (should start with binary data, not HTML)
-                with open(SWIN_MODEL_PATH, "rb") as f:
-                    header = f.read(6)
-                    if header.startswith(b'<'):  # HTML files start with < (e.g., <!DOCTYPE)
-                        if os.path.exists(SWIN_MODEL_PATH):
-                            os.remove(SWIN_MODEL_PATH)
-                        raise ValueError("Downloaded file appears to be HTML instead of PyTorch model")
-
-                return os.path.exists(SWIN_MODEL_PATH)
+            with open(SWIN_MODEL_PATH, "rb") as f:
+                header = f.read(2)
+                if header != b'PK':  # ZIP file magic number
+                    st.warning("Corrupted model file detected. Redownloading...")
+                    os.remove(SWIN_MODEL_PATH)
+                else:
+                    return True
         except Exception as e:
+            st.warning(f"Cannot validate existing model: {str(e)}. Redownloading...")
             if os.path.exists(SWIN_MODEL_PATH):
                 os.remove(SWIN_MODEL_PATH)
-            if attempt == max_retries - 1:
-                st.error(f"⚠️ Failed to download Swin model after {max_retries} attempts: {str(e)}")
-                return False
-            # Continue to next retry attempt
+
+    try:
+        with st.spinner("⏳ Downloading Swin Transformer model from Hugging Face..."):
+            # Parse HF repo URL
+            repo_id = "shivamverma30/hemoscan-model"
+            filename = "swin.pth"
+
+            # Use official huggingface_hub library for robust download
+            downloaded_path = hf_hub_download(
+                repo_id=repo_id,
+                filename=filename,
+                cache_dir=None,  # Use default HF cache, then we'll copy to local
+                force_download=False,
+                resume_download=True,
+                local_dir=MODEL_FOLDER,
+                local_dir_use_symlinks=False
+            )
+
+            # Validate downloaded file
+            if os.path.exists(downloaded_path):
+                # Verify it's a valid PyTorch file
+                try:
+                    with open(downloaded_path, "rb") as f:
+                        header = f.read(2)
+                        if header != b'PK':
+                            raise ValueError("Downloaded file is not a valid PyTorch checkpoint (missing ZIP header)")
+                    
+                    # Try a quick torch.load to validate
+                    test_load = torch.load(downloaded_path, map_location="cpu", weights_only=False)
+                    st.success("✅ Model downloaded and validated successfully!")
+                    return True
+                except Exception as e:
+                    if os.path.exists(downloaded_path):
+                        os.remove(downloaded_path)
+                    raise ValueError(f"Downloaded file is corrupted: {str(e)}")
+            else:
+                raise FileNotFoundError(f"Model file not found at {downloaded_path}")
+                
+    except Exception as e:
+        st.error(f"❌ Failed to download Swin model: {str(e)}")
+        st.info("💡 Troubleshooting: Check your internet connection and verify the HF repo is accessible.")
+        return False
 
 # Create models folder if it doesn't exist
 if not os.path.exists(MODEL_FOLDER):
@@ -815,10 +826,40 @@ def load_model_cached(model_path):
             return load_model(model_path, compile=False)
 
         if model_path.endswith(".pth"):
+            # Pre-validation: Check if file exists and is readable
+            if not os.path.exists(model_path):
+                st.error(f"Model file not found: {model_path}")
+                return None
+
+            # Pre-validation: Check if it's a valid ZIP/PyTorch file
+            try:
+                with open(model_path, "rb") as f:
+                    header = f.read(4)
+                    if header[:2] != b'PK':  # ZIP file magic number (0x504B)
+                        st.error("❌ Model file is corrupted (invalid ZIP header). Attempting to redownload...")
+                        if os.path.exists(model_path):
+                            os.remove(model_path)
+                        if download_model_from_hf():
+                            return load_model_cached(model_path)  # Recursive retry after redownload
+                        return None
+            except Exception as e:
+                st.error(f"Cannot read model file: {str(e)}")
+                return None
+
             default_classes = ['A+', 'A-', 'AB+', 'AB-', 'B+', 'B-', 'O+', 'O-']
             num_classes = len(default_classes)
 
-            checkpoint = torch.load(model_path, map_location="cpu")
+            # Try to load with weights_only=False for compatibility
+            try:
+                checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
+            except Exception as e:
+                st.error(f"❌ Failed to load checkpoint: {str(e)}")
+                st.info("💡 The model file appears corrupted. Attempting to redownload...")
+                if os.path.exists(model_path):
+                    os.remove(model_path)
+                if download_model_from_hf():
+                    return load_model_cached(model_path)  # Recursive retry
+                return None
 
             if isinstance(checkpoint, dict):
                 if "model_state_dict" in checkpoint:
@@ -865,7 +906,7 @@ def load_model_cached(model_path):
 
         raise ValueError("Unsupported model file extension")
     except Exception as e:
-        st.error(f"Error loading model: {str(e)}")
+        st.error(f"❌ Error loading model: {str(e)}")
         return None
 
 model_path = os.path.join(MODEL_FOLDER, selected_model_file)

@@ -1,6 +1,7 @@
 streamlit
 torch
 torchvision
+huggingface-hub
 # Optional for local .keras model support:
 # tensorflow
 pillow
