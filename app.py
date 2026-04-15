@@ -776,8 +776,8 @@ if len(models_list) == 0:
     ]
 
 if len(models_list) == 0:
-    st.error("⚠️ No models found in /models folder. Please add .keras or .pth model files.")
-    st.stop()
+    st.warning("⚠️ No models found in /models folder yet. The UI will still load, and the app will try Hugging Face when available.")
+    models_list = [SWIN_MODEL_FILE]
 
 # Model configurations - Add your models here
 AVAILABLE_MODELS = {
@@ -1027,54 +1027,53 @@ with col1:
 # Handle Form Submission
 if submitted:
     if model is None:
-        st.error("No valid model is loaded. Please select a working model or ensure the checkpoint in /models is valid.")
-        st.stop()
+        st.info("Model not ready yet. The interface is available, but prediction will be disabled until a valid model is loaded.")
+    else:
+        # Validation
+        validation_errors = []
 
-    # Validation
-    validation_errors = []
-    
-    if not name.strip():
-        validation_errors.append("Please enter patient name")
-    if not validate_email(email):
-        validation_errors.append("Please enter a valid email address")
-    if not phone.strip():
-        validation_errors.append("Please enter phone number")
-    if uploaded_file is None:
-        validation_errors.append("Please upload a fingerprint image")
-    
-    if validation_errors:
-        for error in validation_errors:
-            st.error(f" {error}")
-        st.stop()
-    
-    # Clear previous email status on new submission
-    st.session_state.email_status = None
-    
-    # Process Prediction
-    with st.spinner(" Analyzing fingerprint pattern..."):
-        predicted_label, confidence, error = predict_blood_group(
-            model, uploaded_file, input_size, class_labels
-        )
-    
-    if error:
-        st.error(f" Analysis Error: {error}")
-        st.stop()
-    
-    # Store Data
-    user_data = {
-        "name": name,
-        "age": age,
-        "gender": gender,
-        "phone": phone,
-        "email": email
-    }
-    
-    st.session_state.user_data = user_data
-    st.session_state.prediction_data = {
-        "label": predicted_label,
-        "confidence": confidence,
-        "file": uploaded_file
-    }
+        if not name.strip():
+            validation_errors.append("Please enter patient name")
+        if not validate_email(email):
+            validation_errors.append("Please enter a valid email address")
+        if not phone.strip():
+            validation_errors.append("Please enter phone number")
+        if uploaded_file is None:
+            validation_errors.append("Please upload a fingerprint image")
+        
+        if validation_errors:
+            for error in validation_errors:
+                st.error(f" {error}")
+            st.stop()
+        
+        # Clear previous email status on new submission
+        st.session_state.email_status = None
+        
+        # Process Prediction
+        with st.spinner(" Analyzing fingerprint pattern..."):
+            predicted_label, confidence, error = predict_blood_group(
+                model, uploaded_file, input_size, class_labels
+            )
+        
+        if error:
+            st.error(f" Analysis Error: {error}")
+            st.stop()
+        
+        # Store Data
+        user_data = {
+            "name": name,
+            "age": age,
+            "gender": gender,
+            "phone": phone,
+            "email": email
+        }
+        
+        st.session_state.user_data = user_data
+        st.session_state.prediction_data = {
+            "label": predicted_label,
+            "confidence": confidence,
+            "file": uploaded_file
+        }
 
 
 # Display Results in Right Column
