@@ -955,7 +955,30 @@ if "pdf_path" not in st.session_state:
     st.session_state.prediction_data = None
     st.session_state.user_data = None
     st.session_state.email_status = None
+    st.session_state.uploaded_file_bytes = None
+    st.session_state.uploaded_file_name = None
+    st.session_state.uploaded_file_type = None
 
+def persist_uploaded_file():
+    uploaded = st.session_state.get("fingerprint_upload")
+    if uploaded is None:
+        st.session_state.uploaded_file_bytes = None
+        st.session_state.uploaded_file_name = None
+        st.session_state.uploaded_file_type = None
+        return
+
+    st.session_state.uploaded_file_bytes = uploaded.getvalue()
+    st.session_state.uploaded_file_name = uploaded.name
+    st.session_state.uploaded_file_type = uploaded.type
+
+def get_uploaded_file_stream():
+    file_bytes = st.session_state.get("uploaded_file_bytes")
+    if not file_bytes:
+        return None
+
+    uploaded_stream = BytesIO(file_bytes)
+    uploaded_stream.name = st.session_state.get("uploaded_file_name") or "uploaded_image"
+    return uploaded_stream
 
 # -------------------------------------------------
 # Dashboard Layout - Patient Information
@@ -969,31 +992,34 @@ with col1:
     </div>
     """, unsafe_allow_html=True)
     
-    with st.form("patient_form"):
-        name = st.text_input("Full Name*", placeholder="Enter patient full name")
-        
-        col_age, col_gender = st.columns(2)
-        with col_age:
-            age = st.number_input("Age*", min_value=1, max_value=120, value=25)
-        with col_gender:
-            gender = st.selectbox("Gender*", ["Male", "Female", "Other"])
-        
-        phone = st.text_input("Phone Number*", placeholder="(+91) 98765 43210")
-        email = st.text_input("Email Address*", placeholder="patient@gmail.com")
-        
-        st.markdown("---")
-        
-        uploaded_file = st.file_uploader(
-            "📤 Upload Fingerprint Image (Max 5MB)",
-            type=["jpg", "jpeg", "png", "bmp"],
-            help="Upload a clear fingerprint image for analysis (Max size: 5MB)"
-        )
-        
-        submitted = st.form_submit_button("🔬 Analyze Sample", use_container_width=True)
+    name = st.text_input("Full Name*", placeholder="Enter patient full name")
+
+    col_age, col_gender = st.columns(2)
+    with col_age:
+        age = st.number_input("Age*", min_value=1, max_value=120, value=25)
+    with col_gender:
+        gender = st.selectbox("Gender*", ["Male", "Female", "Other"])
+
+    phone = st.text_input("Phone Number*", placeholder="(+91) 98765 43210")
+    email = st.text_input("Email Address*", placeholder="patient@gmail.com")
+
+    st.markdown("---")
+
+    st.file_uploader(
+        "📤 Upload Fingerprint Image (Max 5MB)",
+        type=["jpg", "jpeg", "png", "bmp"],
+        help="Upload a clear fingerprint image for analysis (Max size: 5MB)",
+        key="fingerprint_upload",
+        on_change=persist_uploaded_file
+    )
+
+    submitted = st.button("🔬 Analyze Sample", use_container_width=True)
 
 
 # Handle Form Submission
 if submitted:
+    uploaded_file = get_uploaded_file_stream()
+
     # Validation
     validation_errors = []
 
@@ -1095,6 +1121,7 @@ with col2:
         
         # Image Preview
         st.markdown("### 🔍 Sample Preview")
+        pred_data["file"].seek(0)
         img = Image.open(pred_data['file'])
         col1, col2, col3 = st.columns([1,2,1])
         with col2:
@@ -1103,6 +1130,7 @@ with col2:
         # Generate PDF
         if st.session_state.pdf_path is None:
             with st.spinner("📄 Generating medical report..."):
+                pred_data["file"].seek(0)
                 pdf_path = generate_pdf(user_data, pred_data['label'], 
                                        pred_data['confidence'], pred_data['file'])
                 st.session_state.pdf_path = pdf_path
