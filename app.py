@@ -926,42 +926,10 @@ def load_model_cached(model_path):
         return None
 
 model_path = os.path.join(MODEL_FOLDER, selected_model_file)
-model = load_model_cached(model_path)
-
-if model is None:
-    st.warning("Model could not be loaded. The rest of the UI will still render, but prediction will stay disabled until a valid model is available.")
-
-# Auto-detect input size from model
-if hasattr(model, "input_shape"):
-    model_input_shape = model.input_shape
-    if model_input_shape and len(model_input_shape) >= 3:
-        input_size = (model_input_shape[1], model_input_shape[2])
-    else:
-        input_size = (224, 224)
-else:
-    input_size = (224, 224)
-
-# Get class labels from model output or use default
+model = None
 default_classes = ['A+', 'A-', 'AB+', 'AB-', 'B+', 'B-', 'O+', 'O-']
-if hasattr(model, "output_shape"):
-    model_output_shape = model.output_shape
-    if model_output_shape and len(model_output_shape) >= 2:
-        num_classes = model_output_shape[1]
-        if num_classes <= len(default_classes):
-            class_labels = default_classes[:num_classes]
-        else:
-            class_labels = [f"Class_{i}" for i in range(num_classes)]
-    else:
-        class_labels = default_classes
-else:
-    if hasattr(model, "head") and hasattr(model.head, "out_features"):
-        num_classes = int(model.head.out_features)
-        if num_classes <= len(default_classes):
-            class_labels = default_classes[:num_classes]
-        else:
-            class_labels = [f"Class_{i}" for i in range(num_classes)]
-    else:
-        class_labels = default_classes
+input_size = (224, 224)
+class_labels = default_classes
 
 with model_col2:
     st.markdown("<br>", unsafe_allow_html=True)
@@ -1026,26 +994,29 @@ with col1:
 
 # Handle Form Submission
 if submitted:
+    # Validation
+    validation_errors = []
+
+    if not name.strip():
+        validation_errors.append("Please enter patient name")
+    if not validate_email(email):
+        validation_errors.append("Please enter a valid email address")
+    if not phone.strip():
+        validation_errors.append("Please enter phone number")
+    if uploaded_file is None:
+        validation_errors.append("Please upload a fingerprint image")
+    
+    if validation_errors:
+        for error in validation_errors:
+            st.error(f" {error}")
+        st.stop()
+    
+    if model is None:
+        model = load_model_cached(model_path)
+    
     if model is None:
         st.info("Model not ready yet. The interface is available, but prediction will be disabled until a valid model is loaded.")
     else:
-        # Validation
-        validation_errors = []
-
-        if not name.strip():
-            validation_errors.append("Please enter patient name")
-        if not validate_email(email):
-            validation_errors.append("Please enter a valid email address")
-        if not phone.strip():
-            validation_errors.append("Please enter phone number")
-        if uploaded_file is None:
-            validation_errors.append("Please upload a fingerprint image")
-        
-        if validation_errors:
-            for error in validation_errors:
-                st.error(f" {error}")
-            st.stop()
-        
         # Clear previous email status on new submission
         st.session_state.email_status = None
         
