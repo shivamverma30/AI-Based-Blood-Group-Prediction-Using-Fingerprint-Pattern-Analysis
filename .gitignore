@@ -63,6 +63,7 @@ dataset/
 datasets/
 data/
 models/
+*.pth
 checkpoints/
 artifacts/
 runs/

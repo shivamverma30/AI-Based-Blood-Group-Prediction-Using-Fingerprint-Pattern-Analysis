@@ -27,10 +27,7 @@ import torch
 import torch.nn.functional as torch_f
 from torchvision.models import swin_t
 from torchvision import transforms as torch_transforms
-try:
-    import gdown
-except ImportError:
-    gdown = None
+import requests
 
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage, Table, TableStyle, HRFlowable, KeepTogether
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -677,26 +674,22 @@ def send_email(receiver_email, pdf_path, user_name):
 # -------------------------------------------------
 MODEL_FOLDER = "models"
 SWIN_MODEL_FILE = "swin.pth"
-SWIN_DRIVE_FILE_ID = "1M0OgHX4yQMQJFYbaZPvRQFMBShwYqMGR"
+SWIN_MODEL_URL = "https://huggingface.co/shivamverma30/hemoscan-model/resolve/main/swin.pth"
 SWIN_MODEL_PATH = os.path.join(MODEL_FOLDER, SWIN_MODEL_FILE)
 
 
-def ensure_swin_model_available():
+def download_model_from_hf():
     if os.path.exists(SWIN_MODEL_PATH):
         return True
 
-    if gdown is None:
-        st.error("⚠️ Missing dependency: gdown. Install requirements to enable automatic model download.")
-        return False
-
     try:
         with st.spinner("Downloading Swin Transformer model for deployment..."):
-            gdown.download(
-                id=SWIN_DRIVE_FILE_ID,
-                output=SWIN_MODEL_PATH,
-                quiet=False,
-                fuzzy=True
-            )
+            response = requests.get(SWIN_MODEL_URL, stream=True, timeout=60)
+            response.raise_for_status()
+            with open(SWIN_MODEL_PATH, "wb") as model_file:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        model_file.write(chunk)
         return os.path.exists(SWIN_MODEL_PATH)
     except Exception as e:
         st.error(f"⚠️ Failed to download Swin model: {str(e)}")
@@ -714,7 +707,7 @@ models_list = [
 
 # Cloud fallback: download Swin model when no local model is available.
 if len(models_list) == 0:
-    ensure_swin_model_available()
+    download_model_from_hf()
     models_list = [
         f for f in os.listdir(MODEL_FOLDER)
         if f.endswith(".pth") or (TF_AVAILABLE and f.endswith(".keras"))
